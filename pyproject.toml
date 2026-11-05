@@ -1,0 +1,23 @@
+# Eve PI Planner — packaging metadata.
+# Runtime uses only the Python standard library (sqlite3, tkinter, urllib,
+# zipfile, json); there are NO third-party runtime dependencies.
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eve-pi-planner"
+version = "1.0.0"
+description = "Desktop planner for Planetary Production in Eve Online"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+# After `pip install -e .` you can launch with `eve-pi-planner`.
+# (Or just run `python main.py` without installing anything.)
+eve-pi-planner = "eve_pi.gui:run"
+
+[tool.setuptools]
+packages = ["eve_pi"]

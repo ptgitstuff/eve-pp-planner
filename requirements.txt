@@ -1,0 +1,5 @@
+# Eve PI Planner uses only the Python standard library (sqlite3, tkinter,
+# urllib, zipfile, json). No third-party packages are required.
+#
+# Tkinter ships with python.org Windows/macOS installers. On some Linux
+# distros install it separately, e.g.:  sudo apt install python3-tk
