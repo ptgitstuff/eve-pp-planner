@@ -25,12 +25,10 @@ into the **fewest systems possible** — plus alternatives so you can adjust.
   per-planet rates you set are kept.
 - **Characters** — log your characters in through EVE's own login page and see
   each one's planet slots, what every planet is extracting and making, at what
-  rate, and what's in storage, with totals across all characters. To set it up,
-  create an application at
-  [developers.eveonline.com](https://developers.eveonline.com/applications) with
-  the scopes `esi-planets.manage_planets.v1` and `esi-skills.read_skills.v1` and the
-  callback URL `http://localhost:8766/callback`, then paste its Client ID into the
-  tab. ESI only updates a colony when you view it in the game, so the tab shows how
+  rate, and what's in storage, with totals across all characters. Click *Log in
+  with EVE* and approve each character; there's nothing to set up. The app asks
+  for the scopes `esi-planets.manage_planets.v1` and `esi-skills.read_skills.v1`,
+  and only reads with them. ESI only updates a colony when you view it in the game, so the tab shows how
   old each colony's figures are. Extractor rates are ESI's nominal figure, and
   factory rates assume full supply. Your login is stored encrypted to your Windows
   user. Removing a character only removes it here, so revoke the application on
@@ -219,5 +217,5 @@ python -m tests.test_chain_map       # chain map graph, tracing, colours (31 che
 python -m tests.test_icons           # icon download & cache, faked network (12 checks)
 python -m tests.test_results_model   # results display logic (26 checks)
 python -m tests.test_fulfil          # Janice import & order optimiser (90 checks)
-python -m tests.test_esi             # EVE login, ESI reads, colony logic, faked CCP (70 checks)
+python -m tests.test_esi             # EVE login, ESI reads, colony logic, faked CCP (76 checks)
 ```

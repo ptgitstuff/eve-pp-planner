@@ -166,6 +166,51 @@ def test_client():
     check("add it" in dead["errors"][0], "and says what to do")
     check(not any("r" == e for e in dead["errors"]), "errors hold no token")
 
+    def token_reply():
+        return json.dumps({"access_token": make_token(), "expires_in": 1200}).encode()
+
+    failures = []
+    waits = []
+
+    def flaky(request):
+        if "oauth/token" in request.full_url:
+            return token_reply()
+        if request.full_url.endswith("/planets") and len(failures) < 2:
+            failures.append(1)
+            raise http_error(request.full_url, 502)
+        return b"[]" if request.full_url.endswith("/planets") else b'{"skills": []}'
+
+    recovered = EsiClient(CLIENT, send=flaky, sleep=waits.append).fetch_character(
+        Character(1, "Pilot", "r"))
+    check(recovered["colonies"] == [] and not recovered["errors"], "a brief 502 is retried")
+    check(len(waits) == 2, "and waits between tries")
+
+    waits.clear()
+    reads = []
+
+    def down_502(request):
+        if "oauth/token" in request.full_url:
+            return token_reply()
+        reads.append(request.full_url)
+        raise http_error(request.full_url, 502)
+
+    outage = EsiClient(CLIENT, send=down_502, sleep=waits.append).fetch_character(
+        Character(1, "Pilot", "r"))
+    check(len(reads) == 6, "each call gets three tries, then stops")
+    check(outage["colonies"] is None, "an outage doesn't read as having no colonies")
+    check(len(outage["errors"]) == 1 and "Refresh" in outage["errors"][0],
+          "and gives one message saying what to do")
+
+    waits.clear()
+
+    def refused(request):
+        if "oauth/token" in request.full_url:
+            return token_reply()
+        raise http_error(request.full_url, 403)
+
+    EsiClient(CLIENT, send=refused, sleep=waits.append).fetch_character(Character(1, "P", "r"))
+    check(not waits, "refusals aren't retried")
+
     def offline(request):
         raise OSError("no network")
 
@@ -181,9 +226,9 @@ def test_store():
     check(unprotect("nonsense") == "", "unknown formats come back empty")
     folder = tempfile.mkdtemp()
     path = os.path.join(folder, "sub", "characters.json")
-    check(load_store(path) == ("", []), "no file means no characters")
+    check(load_store(path) == [], "no file means no characters")
     pilot = Character(5, "Pilot", "secret-token", access_token="access-secret")
-    save_store(path, CLIENT, [pilot])
+    save_store(path, [pilot])
     with open(path, encoding="utf-8") as handle:
         text = handle.read()
     check("access-secret" not in text, "access tokens are never saved")
@@ -191,11 +236,11 @@ def test_store():
         check("secret-token" not in text
               and base64.b64encode(b"secret-token").decode() not in text,
               "refresh tokens are encrypted on Windows")
-    client_id, loaded = load_store(path)
-    check(client_id == CLIENT and loaded[0].refresh_token == "secret-token", "reloads")
+    loaded = load_store(path)
+    check(loaded[0].refresh_token == "secret-token", "reloads")
     with open(path, "w", encoding="utf-8") as handle:
         handle.write("{broken")
-    check(load_store(path) == ("", []), "a damaged file means no characters")
+    check(load_store(path) == [], "a damaged file means no characters")
     os.remove(path)
     os.rmdir(os.path.dirname(path))
     os.rmdir(folder)

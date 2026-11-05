@@ -6,15 +6,15 @@ from __future__ import annotations
 import queue
 import threading
 import tkinter as tk
-import webbrowser
 from collections.abc import Callable
 from datetime import datetime, timezone
 from tkinter import messagebox, ttk
 
+from . import esi
 from .colonies import RUNNING, CharacterPI, Colony, Totals, build_character, totals
 from .db import PIDatabase
-from .esi import (CALLBACK_URL, DEVELOPER_SITE, SCOPES, Character, EsiClient, EsiError,
-                  default_store_path, load_store, login, save_store)
+from .esi import (Character, EsiClient, EsiError, default_store_path, load_store, login,
+                  save_store)
 from .icon_set import IconSet
 from .results_model import format_compact, format_duration, nice_ticks
 from .results_view import BAR, FONT_SECTION, PAD, ROW, SECONDARY, SERIES_BLUE, _Panel
@@ -45,8 +45,7 @@ class CharactersPanel(_Panel):
             return self._draw_empty(width)
         now = datetime.now(timezone.utc)
         summary = totals(self.characters)
-        y = self._draw_tiles(14, width, summary)
-        y += 86
+        y = self._draw_tiles(14, width, summary) + 22
         when = (_age(summary.oldest_update, now) if summary.oldest_update
                 else "no colonies found")
         self.text(PAD, y, "ESI only updates a colony when you view it in the game, so "
@@ -66,16 +65,14 @@ class CharactersPanel(_Panel):
                 width, f"{self.saved_count} saved character(s). Click Refresh to read "
                        "their planets from ESI.")
         y = self.section(24, "Connect your characters")
-        steps = (
-            f"1.  Click Developer site and create an application with these scopes: "
-            f"{', '.join(SCOPES)}.",
-            f"2.  Set its callback URL to  {CALLBACK_URL}",
-            "3.  Paste its Client ID above. The secret isn't needed.",
-            "4.  Click Add character and approve it in your browser. Repeat for each "
-            "character.",
+        lines = (
+            "Click Log in with EVE and approve the character on CCP's login page. "
+            "Repeat for each character.",
+            "This app only reads each character's planets and skills. Your EVE password "
+            "never reaches it, and your login stays on this PC.",
         )
-        for step in steps:
-            item = self.text(PAD, y + 8, step, wrap=width - 2 * PAD)
+        for line in lines:
+            item = self.text(PAD, y + 8, line, wrap=width - 2 * PAD)
             y = self.canvas.bbox(item)[3] + 4
         return y + 20
 
@@ -84,8 +81,11 @@ class CharactersPanel(_Panel):
         note = "Colonies / planet slots"
         free = str(summary.free_slots)
         if summary.unknown_slots:
-            note = f"{summary.unknown_slots} character(s) with unreadable skills"
-            free += "+?"
+            note = f"{summary.unknown_slots} character(s) couldn't be read"
+            known = summary.unknown_slots < summary.characters
+            slots = (f"{summary.planets_used} of {summary.max_planets}+?" if known
+                     else f"{summary.planets_used} of ?")
+            free = f"{summary.free_slots}+?" if known else "?"
         return self.tiles(y, width, [
             ("Characters", str(summary.characters), "Logged in"),
             ("Planets", slots, note),
@@ -204,17 +204,11 @@ class CharactersTab(ttk.Frame):
         self._busy = False
         self.on_change: Callable[[], None] | None = None
         self._results: dict[int, CharacterPI] = {}
-        client_id, self._characters = load_store(self._store_path)
+        self._characters = load_store(self._store_path)
 
         bar = ttk.Frame(self, padding=(0, 6))
         bar.pack(fill="x")
-        ttk.Label(bar, text="ESI Client ID:").pack(side="left")
-        self.client_id = tk.StringVar(value=client_id)
-        ttk.Entry(bar, textvariable=self.client_id, width=36).pack(side="left", padx=(6, 6))
-        ttk.Button(bar, text="Developer site",
-                   command=lambda: webbrowser.open(DEVELOPER_SITE)).pack(side="left",
-                                                                         padx=(0, 14))
-        self.add_btn = ttk.Button(bar, text="Add character", command=self.add_character)
+        self.add_btn = ttk.Button(bar, text="Log in with EVE", command=self.add_character)
         self.add_btn.pack(side="left")
         self.refresh_btn = ttk.Button(bar, text="Refresh", command=self.refresh)
         self.refresh_btn.pack(side="left", padx=(6, 14))
@@ -250,7 +244,7 @@ class CharactersTab(ttk.Frame):
 
     def _save(self) -> None:
         try:
-            save_store(self._store_path, self.client_id.get().strip(), self._characters)
+            save_store(self._store_path, self._characters)
         except OSError as exc:
             messagebox.showwarning("Characters", f"Couldn't save your characters:\n{exc}")
 
@@ -284,13 +278,13 @@ class CharactersTab(ttk.Frame):
 
     # ------------------------------------------------------------------ actions
     def add_character(self) -> None:
-        client_id = self.client_id.get().strip()
-        if not client_id:
-            messagebox.showwarning("Client ID needed",
-                                   "Paste the Client ID of your EVE application first.")
+        if not esi.CLIENT_ID:
+            messagebox.showwarning("EVE login isn't set up",
+                                   "This copy of the app has no Client ID. Set CLIENT_ID "
+                                   "in eve_pi/esi.py.")
             return
         self._run("Waiting for you to approve in the browser…",
-                  lambda: login(client_id), self._added)
+                  lambda: login(esi.CLIENT_ID), self._added)
 
     def _added(self, character: Character) -> None:
         self._characters = [c for c in self._characters if c.id != character.id]
@@ -300,16 +294,12 @@ class CharactersTab(ttk.Frame):
 
     def refresh(self) -> None:
         if not self._characters:
-            messagebox.showinfo("Characters", "Add a character first.")
-            return
-        if not self.client_id.get().strip():
-            messagebox.showwarning("Client ID needed",
-                                   "Paste the Client ID of your EVE application first.")
+            messagebox.showinfo("Characters", "Log in with EVE first.")
             return
         self._fetch(list(self._characters))
 
     def _fetch(self, characters: list[Character]) -> None:
-        client = EsiClient(self.client_id.get().strip())
+        client = EsiClient(esi.CLIENT_ID)
         self._run(f"Reading {len(characters)} character(s) from ESI…",
                   lambda: [(c, client.fetch_character(c)) for c in characters],
                   self._fetched)

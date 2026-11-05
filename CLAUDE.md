@@ -101,9 +101,10 @@ Tkinter isn't needed to run the tests or compile `gui.py` (py_compile only parse
   Factory planets are in `ChosenSystem.factories` and aren't selectable.
 - **Janice** has no key-free documented API, so `janice.py` uses the JSON-RPC call
   its web page makes (`Appraisal.find`). It may change; pasted lists always work.
-- **Characters** (`esi.py`, `colonies.py`): each user registers their own EVE
-  application and pastes its client ID; the callback is
-  `http://localhost:8766/callback`. Scopes are `esi-planets.manage_planets.v1` and
+- **Characters** (`esi.py`, `colonies.py`): one registered EVE application is built
+  in as `esi.CLIENT_ID`, so users just click Log in with EVE. That ID is public by
+  design under PKCE; the application's secret must never be in this repo. The
+  callback is `http://localhost:8766/callback`. Scopes are `esi-planets.manage_planets.v1` and
   `esi-skills.read_skills.v1`. Access tokens stay in memory, and refresh tokens are
   stored with DPAPI on Windows (base64 only elsewhere) in `characters.json` in the
   user cache dir. Token signatures aren't verified (no RSA in the stdlib); tokens
@@ -132,5 +133,5 @@ Tkinter isn't needed to run the tests or compile `gui.py` (py_compile only parse
 
 ## Known-good state
 
-All 14 suites pass (343 checks total). No third-party imports; no network needed
+All 14 suites pass (349 checks total). No third-party imports; no network needed
 for tests (only `sde.py`, `market.py`, `icons.py`, `janice.py` and `esi.py` hit the network, at runtime).

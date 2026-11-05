@@ -1,7 +1,8 @@
 """Log characters in with EVE SSO and read their planets and skills from ESI.
 
 This is a desktop app, so it uses the PKCE login: no client secret, just the
-client ID of an application the user registers at developers.eveonline.com.
+client ID of the app's one registered application. That ID isn't secret, as it
+appears in every login URL, so it's built in below. Never put the secret here.
 
 Access tokens stay in memory. Refresh tokens are long-lived, so they are stored
 encrypted to the Windows user (DPAPI) where that's available.
@@ -29,6 +30,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+# From developers.eveonline.com/applications, with SCOPES and CALLBACK_URL below.
+CLIENT_ID = "af8618499d524c1589fcd2972b87cb61"
+
 AUTHORIZE_URL = "https://login.eveonline.com/v2/oauth/authorize"
 TOKEN_URL = "https://login.eveonline.com/v2/oauth/token"
 ESI_URL = "https://esi.evetech.net"
@@ -36,13 +40,14 @@ COMPATIBILITY_DATE = "2020-01-01"
 SCOPES = ("esi-planets.manage_planets.v1", "esi-skills.read_skills.v1")
 CALLBACK_PORT = 8766
 CALLBACK_URL = f"http://localhost:{CALLBACK_PORT}/callback"
-DEVELOPER_SITE = "https://developers.eveonline.com/applications"
 
 _USER_AGENT = "eve-pi-planner/3.0 (personal PI planning tool)"
 _ISSUERS = {"login.eveonline.com", "https://login.eveonline.com",
             "https://login.eveonline.com/"}
 _SUBJECT = re.compile(r"^CHARACTER:EVE:(\d+)$")
 _RENEW_EARLY_SECONDS = 60
+_BUSY_CODES = (502, 503, 504)    # worth another try, unlike other errors
+_RETRY_WAITS = (1.0, 3.0)        # seconds before each retry
 
 Send = Callable[[urllib.request.Request], bytes]
 
@@ -117,7 +122,7 @@ def _wait_for_code(server: HTTPServer, state: str, timeout: float) -> str:
             raise found["error"]
         if found.get("code"):
             return found["code"]
-    raise EsiError("EVE login timed out. Click Add character to try again.")
+    raise EsiError("EVE login timed out. Click Log in with EVE to try again.")
 
 
 def _token_request(fields: dict[str, str], send: Send) -> dict:
@@ -203,9 +208,11 @@ def login(client_id: str, open_browser: Callable[[str], object] = webbrowser.ope
 class EsiClient:
     """Authenticated reads. Safe to use from a worker thread, one at a time."""
 
-    def __init__(self, client_id: str, send: Send = _send):
+    def __init__(self, client_id: str, send: Send = _send,
+                 sleep: Callable[[float], None] = time.sleep):
         self.client_id = client_id
         self._send = send
+        self._sleep = sleep
 
     def _access_token(self, character: Character) -> str:
         if (not character.access_token
@@ -219,23 +226,35 @@ class EsiClient:
         return character.access_token
 
     def _get(self, character: Character, path: str):
+        for wait in (*_RETRY_WAITS, None):
+            try:
+                return self._get_once(character, path)
+            except urllib.error.HTTPError as exc:
+                if exc.code not in _BUSY_CODES or wait is None:
+                    raise self._explain(character, exc) from exc
+                self._sleep(wait)
+            except (OSError, ValueError) as exc:
+                raise EsiError("Couldn't reach ESI. Check your connection.") from exc
+
+    def _get_once(self, character: Character, path: str):
         request = urllib.request.Request(ESI_URL + path, headers={
             "User-Agent": _USER_AGENT, "Accept": "application/json",
             "X-Compatibility-Date": COMPATIBILITY_DATE,
             "Authorization": "Bearer " + self._access_token(character)})
-        try:
-            return json.loads(self._send(request).decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            if exc.code in (401, 403):
-                raise EsiError(f"{character.name}: ESI refused access (HTTP "
-                               f"{exc.code}). Remove the character and add it "
-                               "again.") from exc
-            if exc.code in (420, 429):
-                raise EsiError("ESI is rate limiting requests. Try again in a "
-                               "minute.") from exc
-            raise EsiError(f"{character.name}: ESI error (HTTP {exc.code}).") from exc
-        except (OSError, ValueError) as exc:
-            raise EsiError("Couldn't reach ESI. Check your connection.") from exc
+        return json.loads(self._send(request).decode("utf-8"))
+
+    @staticmethod
+    def _explain(character: Character, exc: urllib.error.HTTPError) -> EsiError:
+        if exc.code in _BUSY_CODES:
+            return EsiError(f"ESI's servers aren't responding (HTTP {exc.code}), which is "
+                            "usual around the game's daily downtime at 11:00 UTC. Click "
+                            "Refresh to try again later.")
+        if exc.code in (401, 403):
+            return EsiError(f"{character.name}: ESI refused access (HTTP {exc.code}). "
+                            "Remove the character and add it again.")
+        if exc.code in (420, 429):
+            return EsiError("ESI is rate limiting requests. Try again in a minute.")
+        return EsiError(f"{character.name}: ESI error (HTTP {exc.code}).")
 
     def fetch_character(self, character: Character) -> dict:
         """Everything for one character as raw ESI data. A failed call becomes an
@@ -326,21 +345,19 @@ def default_store_path() -> str:
     return os.path.join(default_cache_dir(), "characters.json")
 
 
-def load_store(path: str) -> tuple[str, list[Character]]:
-    """(client ID, characters). Missing or damaged files just mean none yet."""
+def load_store(path: str) -> list[Character]:
+    """Saved characters. Missing or damaged files just mean none yet."""
     try:
         with open(path, encoding="utf-8") as handle:
             data = json.load(handle)
-        characters = [Character(int(c["id"]), str(c["name"]), unprotect(c["token"]))
-                      for c in data.get("characters", [])]
-        return str(data.get("client_id", "")), characters
+        return [Character(int(c["id"]), str(c["name"]), unprotect(c["token"]))
+                for c in data.get("characters", [])]
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
-        return "", []
+        return []
 
 
-def save_store(path: str, client_id: str, characters: list[Character]) -> None:
-    data = {"client_id": client_id,
-            "characters": [{"id": c.id, "name": c.name, "token": protect(c.refresh_token)}
+def save_store(path: str, characters: list[Character]) -> None:
+    data = {"characters": [{"id": c.id, "name": c.name, "token": protect(c.refresh_token)}
                            for c in characters]}
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     temporary = path + ".tmp"
