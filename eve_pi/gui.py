@@ -30,9 +30,11 @@ from .production import (ORDER_PRODUCT, PlanetPick, build_report, calculate_from
 from .results_view import OutputView, ProductionView
 from .settings import coerce, default_settings_path, load_json, save_json, window_size
 from .theme import apply_theme
+from .tracking_view import LATEST_PLAN, TrackingTab
 
 # Only tabs that show something without a plan reopen; plan results aren't saved.
-_REOPENING_TABS = ("Chain map", "Fulfil order", "Characters", "Best systems", "PI guide")
+_REOPENING_TABS = ("Chain map", "Fulfil order", "Characters", "Production tracking",
+                   "Best systems", "PI guide")
 _SAVE_DELAY_MS = 600
 
 
@@ -143,7 +145,9 @@ class PlannerApp(ttk.Frame):
                  "adv_per": self.adv_per, "price_basis": self.price_basis,
                  "order_chars": self.order_chars, "order_per_char": self.order_per_char,
                  "order_use_real": self.order_use_real,
-                 "guide_product": self.guide_product}
+                 "guide_product": self.guide_product,
+                 "tracking_window": self.tracking_tab.window,
+                 "tracking_target": self.tracking_tab.target}
         named.update({f"band.{name}": var for name, var in self.band_vars.items()})
         named.update({f"type.{name}": var for name, var in self.type_vars.items()})
         return named
@@ -156,10 +160,13 @@ class PlannerApp(ttk.Frame):
             value = coerce(saved[name], var.get())
             if name in ("product", "guide_product") and value not in self.pi_products:
                 continue
+            if name == "tracking_target" and value not in (LATEST_PLAN, *self.pi_products):
+                continue
             var.set(value)
         self._sync_mode()
         self._sync_order_slots()
         self._show_guide()
+        self.tracking_tab.update_view()
         self.order_txt.insert("1.0", coerce(saved.get("order_text"), ""))
 
         top = self.winfo_toplevel()
@@ -312,7 +319,15 @@ class PlannerApp(ttk.Frame):
         # Characters tab
         self.characters_tab = CharactersTab(nb, self.icons, lambda: self.db)
         nb.add(self.characters_tab, text="Characters")
-        self.characters_tab.on_change = self._sync_order_slots
+
+        # Production tracking tab
+        self.tracking_tab = TrackingTab(
+            nb, self.icons, lambda: self.db, lambda: self.characters_tab.panel.characters,
+            self._plan_recipe, self._default_rate, lambda: self._facility_rates,
+            lambda rate: self.p0_rate.set(str(round(rate))))
+        nb.add(self.tracking_tab, text="Production tracking")
+        nb.bind("<<NotebookTabChanged>>", self._on_results_tab, add="+")
+        self.characters_tab.on_change = self._on_characters_changed
         self._sync_order_slots()
 
         # Recommended set-up tab
@@ -541,6 +556,19 @@ class PlannerApp(ttk.Frame):
             source += f", worth {payload.split_value:,.0f} ISK at the appraisal's split price"
         self._run_order(payload.items, source + ".")
 
+    def _on_characters_changed(self) -> None:
+        self._sync_order_slots()
+        self.tracking_tab.update_view()
+
+    def _on_results_tab(self, _event=None) -> None:
+        """A plan or the default rate may have changed since this tab was last open."""
+        if self.results_nb.select() == str(self.tracking_tab):
+            self.tracking_tab.update_view()
+
+    def _plan_recipe(self):
+        plan = self._last_plan
+        return plan.production.recipe if plan and plan.production else None
+
     def _sync_order_slots(self) -> None:
         """Show which slots Optimise will use, after any Characters tab change."""
         read = self.characters_tab.panel.characters
@@ -641,6 +669,7 @@ class PlannerApp(ttk.Frame):
             self.pi_products = self.db.all_pi_products()
             self.product_cb["values"] = self.pi_products
             self.guide_cb["values"] = self.pi_products
+            self.tracking_tab.set_products(self.pi_products)
             self._facility_rates = facility_rates(self.db)
             self.chain_map.set_graph(build_chain_graph(self.db))
             self.data_status.config(text="SDE data loaded.")
@@ -690,6 +719,7 @@ class PlannerApp(ttk.Frame):
         self.calc_view.redraw()
         self.fulfil_view.redraw()
         self.characters_tab.panel.redraw()
+        self.tracking_tab.panel.redraw()
         for planet_type in PLANET_TYPES:
             self.guide_planets_tv.item(planet_type,
                                        image=self._tree_icon(planet_type))

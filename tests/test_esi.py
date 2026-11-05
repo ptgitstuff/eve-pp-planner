@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)).rsplit(os.sep, 1)[
 from eve_pi.colonies import (NO_PROGRAM, RUNNING, STOPPED, build_character, parse_time,
                              slot_roster, totals)
 from eve_pi.db import PIDatabase
+from eve_pi.extraction import program_average
 from eve_pi.esi import (SCOPES, Character, EsiClient, EsiError, authorize_url, load_store,
                         login, make_pkce, parse_callback, protect, read_token, save_store,
                         unprotect)
@@ -301,7 +302,8 @@ def test_colonies(db):
     check(barren.command_center_level == 5, "command center level read")
     extractor = barren.extractors[0]
     check(extractor.product == "Aqueous Liquids", "extractor product named")
-    check(abs(extractor.per_hour - 2000) < 1e-6, "1000 per 30 minutes = 2000/hr")
+    check(abs(extractor.per_hour - 4000) < 1e-6, "no install time: base 1000 per 15 minutes")
+    check(extractor.cycles == 0 and extractor.qty == 1000, "program length unknown")
     check(extractor.heads == 2 and extractor.status is RUNNING, "heads and status")
     group = barren.factories[0]
     check((group.product, group.count) == ("Water", 2), "factories grouped by product")
@@ -320,7 +322,19 @@ def test_colonies(db):
     check(not unknown.has_details, "missing details are marked")
 
     all_of = totals([pilot])
-    check(all_of.extraction == {"Aqueous Liquids": 2000.0}, "only running extractors count")
+    check(all_of.extraction == {"Aqueous Liquids": 4000.0}, "only running extractors count")
+
+    timed = _extractor(db.type_id_by_name("Aqueous Liquids"), 1000,
+                       "2026-01-02T00:00:00Z", cycle=3600)
+    timed["install_time"] = "2026-01-01T00:00:00Z"
+    planned = build_character(9, "Timed", {
+        "colonies": [{"planet_id": 1, "solar_system_id": 1001, "planet_type": "barren",
+                      "upgrade_level": 1, "last_update": "2026-01-01T00:00:00Z"}],
+        "details": {1: {"pins": [timed], "links": [], "routes": []}}, "skills": None,
+        "errors": []}, db, now=datetime(2026, 1, 1, tzinfo=timezone.utc)).colonies[0].extractors[0]
+    check(planned.cycles == 24, "cycles from install and expiry times")
+    check(abs(planned.per_hour - program_average(1000, 3600, 24)) < 1e-6,
+          "extractor rate is the program's predicted average")
     check(all_of.holdings == {"Aqueous Liquids": 75, "Water": 300}, "holdings summed")
     check(all_of.oldest_update == parse_time("2026-11-04T12:00:00Z"), "oldest update found")
     check((all_of.planets_used, all_of.max_planets, all_of.free_slots) == (3, 5, 2), "slot totals")
@@ -331,7 +345,7 @@ def test_colonies(db):
     check(blind.max_planets is None and blind.free_slots is None, "unread skills stay unknown")
     both = totals([pilot, blind])
     check(both.unknown_slots == 1 and both.max_planets == 5, "unknown slots aren't guessed")
-    check(both.extraction["Aqueous Liquids"] == 4000.0, "totals span characters")
+    check(both.extraction["Aqueous Liquids"] == 8000.0, "totals span characters")
 
     untrained = build_character(1, "New", {"skills": {"skills": []}, "colonies": [],
                                            "details": {}, "errors": []}, db, now=NOW)

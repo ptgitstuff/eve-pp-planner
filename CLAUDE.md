@@ -22,12 +22,13 @@ python -m tests.test_results_model
 python -m tests.test_fulfil
 python -m tests.test_esi
 python -m tests.test_settings
+python -m tests.test_tracking
 ```
 
 Quick "all green" check:
 ```bash
 python -m py_compile main.py eve_pi/*.py tests/*.py
-for t in core official_sde production calculator selection market profitability guide_and_single facilities chain_map icons results_model fulfil esi settings; do python -m tests.test_$t | tail -1; done
+for t in core official_sde production calculator selection market profitability guide_and_single facilities chain_map icons results_model fulfil esi settings tracking; do python -m tests.test_$t | tail -1; done
 ```
 Tkinter isn't needed to run the tests or compile `gui.py` (py_compile only parses it).
 
@@ -59,8 +60,11 @@ Tkinter isn't needed to run the tests or compile `gui.py` (py_compile only parse
 | `esi.py` | EVE SSO login (PKCE, no secret), authenticated ESI reads, encrypted refresh-token store. |
 | `colonies.py` | Raw ESI data → planet slots, per-planet production and rates, holdings, totals (no Tkinter). |
 | `characters_view.py` | Controls and canvas panel for the Characters tab. |
+| `extraction.py` | Predicted extractor output per cycle, and spreading output across time (no Tkinter). |
+| `tracking.py` | Program records, window estimates, rebalancing against a recipe (no Tkinter). |
+| `tracking_view.py` | Controls and canvas panel for the Production tracking tab. |
 | `settings.py` | Saved settings file: safe load and save, value checks, window size (no Tkinter). |
-| `gui.py` | Tkinter desktop app (tabs: chain map, fulfil order, characters, set-up, best systems, select planets, alternatives, production estimate, output calculator, production chain, PI guide). |
+| `gui.py` | Tkinter desktop app (tabs: chain map, fulfil order, characters, production tracking, set-up, best systems, select planets, alternatives, production estimate, output calculator, production chain, PI guide). |
 
 ## Key domain facts & design decisions
 
@@ -112,8 +116,22 @@ Tkinter isn't needed to run the tests or compile `gui.py` (py_compile only parse
   user cache dir. Token signatures aren't verified (no RSA in the stdlib); tokens
   come straight from CCP over TLS. Slots = 1 + Interplanetary Consolidation (2495).
   ESI only recalculates a colony when it's viewed in game, so the tab always shows
-  each colony's age. Extractor rates are ESI's nominal figure and factory rates are
-  fully supplied maximums.
+  each colony's age. Extractor rates are the predicted program average and factory
+  rates are fully supplied maximums.
+- **Extractor output** (`extraction.py`): ESI's `qty_per_cycle` is a base per 15
+  minutes, not per cycle. Real routes confirm the scale (`qty * cycle / 900 * 1.8`).
+  Decay and the wave follow the community-known formula, and haven't been checked
+  against the game's own extractor graph. The maths is our own code; the repo it was
+  learned from has no licence, so don't copy from it.
+- **Production tracking** (`tracking.py`): ESI doesn't report real output, hauling or
+  consumption, so everything is predicted from program settings. The window estimate
+  assumes each extractor restarts its latest program, even if it's stopped, so it
+  means "can produce". `production_history.json` (user cache dir, no tokens or names)
+  records programs by character/planet/pin/install time; removed characters' records
+  stay on disk but aren't shown. `tune` shares extractor planets and free slots for
+  the most output, leaves factory planets alone, and labels the default rate as
+  assumed for resources you don't extract. `Fulfil order` still uses one rate for all
+  resources; *Use my average rate* sets that rate from your planets.
 - **Real slots in orders** (`colonies.slot_roster`, `fulfil.split_roster`): once
   characters are read, Optimise plans around each one's free slots unless the box
   is unticked. Characters whose slots can't be read are named and left out, never
@@ -140,5 +158,5 @@ Tkinter isn't needed to run the tests or compile `gui.py` (py_compile only parse
 
 ## Known-good state
 
-All 15 suites pass (381 checks total). No third-party imports; no network needed
+All 16 suites pass (456 checks total). No third-party imports; no network needed
 for tests (only `sde.py`, `market.py`, `icons.py`, `janice.py` and `esi.py` hit the network, at runtime).

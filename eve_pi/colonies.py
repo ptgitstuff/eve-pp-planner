@@ -3,9 +3,10 @@ each planet produces, at what rate, and what is in storage. There is no Tkinter
 or network here, so all of it is testable.
 
 ESI only recalculates a colony when someone views it in the game client, so every
-figure is as of that colony's ``last_update``. Rates are nominal: the extractor
-rate is what ESI reports per cycle, and real output varies from cycle to cycle. A
-factory rate is the most its facilities can make when they are fully supplied.
+figure is as of that colony's ``last_update``. An extractor rate is the predicted
+average over its whole program (see ``extraction.py``), as real output changes
+from cycle to cycle. A factory rate is the most its facilities can make when they
+are fully supplied.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from .db import PIDatabase
+from .extraction import BASE_PER_HOUR, program_average
 from .facilities import facility_rates
 from .fulfil import CharacterSlots
 from .results_model import STATUS_CRITICAL, STATUS_GOOD, STATUS_WARNING, Status
@@ -35,6 +37,11 @@ class Extractor:
     heads: int
     expires: datetime | None
     status: Status
+    pin_id: int = 0
+    qty: int = 0                        # ESI's base figure, per 15 minutes
+    cycle_seconds: int = 0
+    cycles: int = 0                     # 0 when ESI gave no install time
+    install: datetime | None = None
 
 
 @dataclass
@@ -113,9 +120,16 @@ def _read_pins(colony: Colony, pins: list[dict], db: PIDatabase, product_of: dic
                     0.0, len(details.get("heads") or ()), expires, NO_PROGRAM))
                 continue
             status = STOPPED if expires is not None and expires <= now else RUNNING
+            qty = details.get("qty_per_cycle") or 0
+            install = parse_time(pin.get("install_time"))
+            cycles = 0
+            if install is not None and expires is not None:
+                cycles = max(round((expires - install).total_seconds() / cycle), 0)
+            # With no program length to average over, use the base rate before decay.
+            rate = program_average(qty, cycle, cycles) if cycles else qty * BASE_PER_HOUR
             colony.extractors.append(Extractor(
-                name_of(product_id), (details.get("qty_per_cycle") or 0) * 3600.0 / cycle,
-                len(details.get("heads") or ()), expires, status))
+                name_of(product_id), rate, len(details.get("heads") or ()), expires, status,
+                pin.get("pin_id", 0), qty, cycle, cycles, install))
             continue
 
         factory = pin.get("factory_details") or {}

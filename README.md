@@ -29,13 +29,22 @@ into the **fewest systems possible** — plus alternatives so you can adjust.
   with EVE* and approve each character; there's nothing to set up. The app asks
   for the scopes `esi-planets.manage_planets.v1` and `esi-skills.read_skills.v1`,
   and only reads with them. ESI only updates a colony when you view it in the game, so the tab shows how
-  old each colony's figures are. Extractor rates are ESI's nominal figure, and
-  factory rates assume full supply. Your login is stored encrypted to your Windows
+  old each colony's figures are. Extractor rates are the predicted average over
+  the installed program, and factory rates assume full supply. Your login is stored encrypted to your Windows
   user. Removing a character only removes it here, so revoke the application on
   CCP's account site to fully end its access. After a Refresh, *Fulfil order* plans
   around each character's free slots, keeps planets off characters already on them,
   and names who gets what; untick its box to type your own numbers instead. Your
   existing colonies' output and holdings don't count towards the order.
+- **Production tracking** — graphs what your planets can produce over a window of
+  24 hours to 30 days, in total and per resource, as if each extractor started its
+  latest program now and restarted it whenever it ended. It also keeps a record of
+  every program it sees. Choose a product or your latest plan or order to see which
+  resource limits output, how many planets to add or remove for each resource, and
+  which factories to build. *Use my average rate* sends your real rate per planet
+  to the Output calculator and Fulfil order. These are predictions from each
+  program's settings, because ESI doesn't report what was really extracted. ESI only
+  shows an extractor's latest program, so one replaced between reads isn't recorded.
 - **Remembers your set-up** — your logins, staging system, range, slots, security
   bands, rates, order text, window size and other settings are kept between
   sessions, on this PC only. At launch the Characters tab shows the last figures it
@@ -174,6 +183,9 @@ output calculator, and the full production chain.
 | `eve_pi/esi.py` | EVE login, character reads from ESI, saved logins. |
 | `eve_pi/colonies.py` | Planet slots, production, rates and holdings from ESI data. |
 | `eve_pi/characters_view.py` | Characters tab. |
+| `eve_pi/extraction.py` | Predicted extractor output, cycle by cycle. |
+| `eve_pi/tracking.py` | Program records, window estimates, rebalancing advice. |
+| `eve_pi/tracking_view.py` | Production tracking tab. |
 | `eve_pi/settings.py` | Saved settings between sessions. |
 | `eve_pi/market.py` | Jita prices + daily volume from ESI; ISK valuation of output/surplus. |
 | `eve_pi/profitability.py` | Tier classification + slot-filling portfolio ISK/hr ranking. |
@@ -224,6 +236,7 @@ python -m tests.test_chain_map       # chain map graph, tracing, colours (31 che
 python -m tests.test_icons           # icon download & cache, faked network (12 checks)
 python -m tests.test_results_model   # results display logic (26 checks)
 python -m tests.test_fulfil          # Janice import & order optimiser (90 checks)
-python -m tests.test_esi             # EVE login, ESI reads, colony logic, faked CCP (76 checks)
+python -m tests.test_esi             # EVE login, ESI reads, colony logic, faked CCP (79 checks)
 python -m tests.test_settings        # saved settings & character figures (32 checks)
+python -m tests.test_tracking        # extractor output, records, rebalancing (72 checks)
 ```

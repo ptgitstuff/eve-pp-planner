@@ -93,7 +93,7 @@ class CharactersPanel(_Panel):
             ("Planets", slots, note),
             ("Free slots", free, "From Interplanetary Consolidation"),
             ("Raw extraction", format_compact(sum(summary.extraction.values())),
-             "Units per hour, nominal"),
+             "Units per hour, program average"),
         ])
 
     def _draw_extraction(self, y, width, summary: Totals) -> int:
