@@ -19,6 +19,8 @@ env/
 eve_pi.sqlite*
 planet_selection.json
 characters.json
+character_data.json
+settings.json
 
 # Editor / OS cruft
 .vscode/

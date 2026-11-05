@@ -36,6 +36,12 @@ into the **fewest systems possible** — plus alternatives so you can adjust.
   around each character's free slots, keeps planets off characters already on them,
   and names who gets what; untick its box to type your own numbers instead. Your
   existing colonies' output and holdings don't count towards the order.
+- **Remembers your set-up** — your logins, staging system, range, slots, security
+  bands, rates, order text, window size and other settings are kept between
+  sessions, on this PC only. At launch the Characters tab shows the last figures it
+  read, then updates them from ESI by itself; if ESI is down, you keep the old
+  figures with a note saying so. Plan results aren't kept, so click *Find planets*
+  or *Optimise* again to see them.
 - **Two ways to choose your output**
   - *Final product* — pick any PI commodity (P1 → P4, e.g. *Nano-Factory*).
     The tool walks the production chain back to the raw (P0) resources it needs
@@ -168,6 +174,7 @@ output calculator, and the full production chain.
 | `eve_pi/esi.py` | EVE login, character reads from ESI, saved logins. |
 | `eve_pi/colonies.py` | Planet slots, production, rates and holdings from ESI data. |
 | `eve_pi/characters_view.py` | Characters tab. |
+| `eve_pi/settings.py` | Saved settings between sessions. |
 | `eve_pi/market.py` | Jita prices + daily volume from ESI; ISK valuation of output/surplus. |
 | `eve_pi/profitability.py` | Tier classification + slot-filling portfolio ISK/hr ranking. |
 | `eve_pi/guide.py` | Planet outputs + full P0→P4 production-chain trees. |
@@ -218,4 +225,5 @@ python -m tests.test_icons           # icon download & cache, faked network (12 
 python -m tests.test_results_model   # results display logic (26 checks)
 python -m tests.test_fulfil          # Janice import & order optimiser (90 checks)
 python -m tests.test_esi             # EVE login, ESI reads, colony logic, faked CCP (76 checks)
+python -m tests.test_settings        # saved settings & character figures (32 checks)
 ```

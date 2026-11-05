@@ -17,6 +17,7 @@ from .db import PIDatabase
 from .facilities import facility_rates
 from .fulfil import CharacterSlots
 from .results_model import STATUS_CRITICAL, STATUS_GOOD, STATUS_WARNING, Status
+from .settings import load_json, save_json
 
 INTERPLANETARY_CONSOLIDATION = 2495
 COMMAND_CENTER_UPGRADES = 2505
@@ -169,6 +170,52 @@ def build_character(character_id: int, name: str, raw: dict, db: PIDatabase,
         result.colonies.append(colony)
     result.colonies.sort(key=lambda c: (c.system, c.name))
     return result
+
+
+def merge_raw(old: dict | None, new: dict) -> dict:
+    """A new read, with anything it failed to get filled in from the last good one,
+    so an ESI outage doesn't blank figures the app already had. Says when it does."""
+    if not old:
+        return new
+    merged = dict(new)
+    details = dict(new.get("details") or {})
+    kept = False
+    if new.get("skills") is None and old.get("skills") is not None:
+        merged["skills"] = old["skills"]
+        kept = True
+    if new.get("colonies") is None and old.get("colonies") is not None:
+        merged["colonies"] = old["colonies"]
+        kept = True
+    for entry in merged.get("colonies") or ():
+        planet_id = entry["planet_id"]
+        if planet_id not in details and planet_id in (old.get("details") or {}):
+            details[planet_id] = old["details"][planet_id]
+            kept = True
+    merged["details"] = details
+    if kept:
+        merged["errors"] = [*new.get("errors", ()),
+                            "Showing the last figures read for anything that failed."]
+    return merged
+
+
+def load_character_data(path: str) -> dict[int, dict]:
+    """Saved raw reads by character ID. JSON has only string keys, so restore IDs."""
+    out: dict[int, dict] = {}
+    for key, raw in load_json(path).items():
+        try:
+            out[int(key)] = {
+                "skills": raw.get("skills"), "colonies": raw.get("colonies"), "errors": [],
+                "details": {int(k): v for k, v in (raw.get("details") or {}).items()}}
+        except (AttributeError, TypeError, ValueError):
+            continue
+    return out
+
+
+def save_character_data(path: str, data: dict[int, dict]) -> None:
+    """Colony and skill figures only: tokens are never part of a raw read."""
+    save_json(path, {str(k): {"skills": v.get("skills"), "colonies": v.get("colonies"),
+                              "details": v.get("details") or {}}
+                     for k, v in data.items()})
 
 
 def slot_roster(characters: list[CharacterPI]) -> tuple[list[CharacterSlots], list[str]]:

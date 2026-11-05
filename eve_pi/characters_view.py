@@ -3,6 +3,7 @@ what every planet produces, at what rate, and what's in storage."""
 
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import tkinter as tk
@@ -11,7 +12,8 @@ from datetime import datetime, timezone
 from tkinter import messagebox, ttk
 
 from . import esi
-from .colonies import RUNNING, CharacterPI, Colony, Totals, build_character, totals
+from .colonies import (RUNNING, CharacterPI, Colony, Totals, build_character,
+                       load_character_data, merge_raw, save_character_data, totals)
 from .db import PIDatabase
 from .esi import (Character, EsiClient, EsiError, default_store_path, load_store, login,
                   save_store)
@@ -204,6 +206,7 @@ class CharactersTab(ttk.Frame):
         self._busy = False
         self.on_change: Callable[[], None] | None = None
         self._results: dict[int, CharacterPI] = {}
+        self._raw: dict[int, dict] = {}
         self._characters = load_store(self._store_path)
 
         bar = ttk.Frame(self, padding=(0, 6))
@@ -224,6 +227,32 @@ class CharactersTab(ttk.Frame):
         self.panel = CharactersPanel(self, icons)
         self.panel.pack(fill="both", expand=True)
         self._show()
+
+    # ------------------------------------------------------------------ memory
+    @property
+    def _data_path(self) -> str:
+        return os.path.join(os.path.dirname(self._store_path), "character_data.json")
+
+    def _save_data(self) -> None:
+        try:
+            save_character_data(self._data_path, self._raw)
+        except OSError:
+            pass     # only a convenience: the next read gets these figures again
+
+    def load_saved(self) -> None:
+        """Show the last figures read, then read fresh ones. Needs the database."""
+        db = self._get_db()
+        if db is None:
+            return
+        saved = load_character_data(self._data_path)
+        for character in self._characters:
+            if character.id in saved:
+                self._raw[character.id] = saved[character.id]
+                self._results[character.id] = build_character(
+                    character.id, character.name, saved[character.id], db)
+        self._show()
+        if self._characters and esi.CLIENT_ID and not self._busy:
+            self._fetch(list(self._characters))
 
     # ------------------------------------------------------------------ display
     def _show(self) -> None:
@@ -313,8 +342,11 @@ class CharactersTab(ttk.Frame):
                                                  "and items can be named.")
             return
         for character, raw in results:
+            merged = merge_raw(self._raw.get(character.id), raw)
+            self._raw[character.id] = merged
             self._results[character.id] = build_character(character.id, character.name,
-                                                          raw, db)
+                                                          merged, db)
+        self._save_data()
         self._show()
 
     def remove_character(self) -> None:
@@ -329,5 +361,7 @@ class CharactersTab(ttk.Frame):
             return
         self._characters.remove(match)
         self._results.pop(match.id, None)
+        self._raw.pop(match.id, None)
         self._save()
+        self._save_data()
         self._show()

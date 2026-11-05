@@ -21,12 +21,13 @@ python -m tests.test_icons
 python -m tests.test_results_model
 python -m tests.test_fulfil
 python -m tests.test_esi
+python -m tests.test_settings
 ```
 
 Quick "all green" check:
 ```bash
 python -m py_compile main.py eve_pi/*.py tests/*.py
-for t in core official_sde production calculator selection market profitability guide_and_single facilities chain_map icons results_model fulfil esi; do python -m tests.test_$t | tail -1; done
+for t in core official_sde production calculator selection market profitability guide_and_single facilities chain_map icons results_model fulfil esi settings; do python -m tests.test_$t | tail -1; done
 ```
 Tkinter isn't needed to run the tests or compile `gui.py` (py_compile only parses it).
 
@@ -58,6 +59,7 @@ Tkinter isn't needed to run the tests or compile `gui.py` (py_compile only parse
 | `esi.py` | EVE SSO login (PKCE, no secret), authenticated ESI reads, encrypted refresh-token store. |
 | `colonies.py` | Raw ESI data → planet slots, per-planet production and rates, holdings, totals (no Tkinter). |
 | `characters_view.py` | Controls and canvas panel for the Characters tab. |
+| `settings.py` | Saved settings file: safe load and save, value checks, window size (no Tkinter). |
 | `gui.py` | Tkinter desktop app (tabs: chain map, fulfil order, characters, set-up, best systems, select planets, alternatives, production estimate, output calculator, production chain, PI guide). |
 
 ## Key domain facts & design decisions
@@ -115,10 +117,15 @@ Tkinter isn't needed to run the tests or compile `gui.py` (py_compile only parse
 - **Real slots in orders** (`colonies.slot_roster`, `fulfil.split_roster`): once
   characters are read, Optimise plans around each one's free slots unless the box
   is unticked. Characters whose slots can't be read are named and left out, never
-  guessed. A planet never goes to a character already on it. Results aren't saved,
-  so typed numbers apply until Refresh runs. Existing colonies' output and holdings
-  don't count towards the order, and Production estimate's character figures still
-  assume 6 planets each.
+  guessed. A planet never goes to a character already on it. Existing colonies'
+  output and holdings don't count towards the order, and Production estimate's
+  character figures still assume 6 planets each.
+- **Memory** (user cache dir): `settings.json` holds controls, order text, window
+  size and the open tab; add new controls to `PlannerApp._setting_vars`.
+  `character_data.json` holds the last ESI figures (no tokens). At launch the app
+  shows those, then reads ESI by itself. `colonies.merge_raw` keeps old figures for
+  anything a read fails to get, and says so. Plan results aren't saved, so tabs
+  that only show a plan don't reopen.
 - **Planner slot sharing**: planets are handed out one per round, scarcest
   resource first, so shared planet types aren't used up by earlier resources.
 
@@ -133,5 +140,5 @@ Tkinter isn't needed to run the tests or compile `gui.py` (py_compile only parse
 
 ## Known-good state
 
-All 14 suites pass (349 checks total). No third-party imports; no network needed
+All 15 suites pass (381 checks total). No third-party imports; no network needed
 for tests (only `sde.py`, `market.py`, `icons.py`, `janice.py` and `esi.py` hit the network, at runtime).

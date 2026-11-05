@@ -28,7 +28,12 @@ from .production import (ORDER_PRODUCT, PlanetPick, build_report, calculate_from
                         characters_needed, default_selection_path,
                         load_selection, save_selection)
 from .results_view import OutputView, ProductionView
+from .settings import coerce, default_settings_path, load_json, save_json, window_size
 from .theme import apply_theme
+
+# Only tabs that show something without a plan reopen; plan results aren't saved.
+_REOPENING_TABS = ("Chain map", "Fulfil order", "Characters", "Best systems", "PI guide")
+_SAVE_DELAY_MS = 600
 
 
 class AutocompleteEntry(ttk.Frame):
@@ -121,7 +126,94 @@ class PlannerApp(ttk.Frame):
         self._build_controls()
         self._build_results()
 
+        self._settings_path = default_settings_path()
+        self._settings = load_json(self._settings_path)
+        self._save_job = None
+
         self._try_open_db()
+        self._restore_settings()
+        self._watch_settings()
+
+    # ---- remembered settings ---------------------------------------------
+    def _setting_vars(self) -> dict[str, tk.Variable]:
+        named = {"staging": self.staging.var, "jumps": self.jumps, "slots": self.slots,
+                 "mode": self.mode, "single_system": self.single_system_var,
+                 "product": self.product, "best_tier": self.best_tier,
+                 "p0_rate": self.p0_rate, "basic_per": self.basic_per,
+                 "adv_per": self.adv_per, "price_basis": self.price_basis,
+                 "order_chars": self.order_chars, "order_per_char": self.order_per_char,
+                 "order_use_real": self.order_use_real,
+                 "guide_product": self.guide_product}
+        named.update({f"band.{name}": var for name, var in self.band_vars.items()})
+        named.update({f"type.{name}": var for name, var in self.type_vars.items()})
+        return named
+
+    def _restore_settings(self):
+        saved = self._settings
+        for name, var in self._setting_vars().items():
+            if name not in saved:
+                continue
+            value = coerce(saved[name], var.get())
+            if name in ("product", "guide_product") and value not in self.pi_products:
+                continue
+            var.set(value)
+        self._sync_mode()
+        self._sync_order_slots()
+        self._show_guide()
+        self.order_txt.insert("1.0", coerce(saved.get("order_text"), ""))
+
+        top = self.winfo_toplevel()
+        size = window_size(saved.get("window"), top.winfo_screenwidth(),
+                           top.winfo_screenheight())
+        if size:
+            top.geometry(size)
+        if saved.get("window_zoomed") is True:
+            try:
+                top.state("zoomed")
+            except tk.TclError:
+                pass        # not every platform has this state
+        tab = saved.get("tab")
+        if tab in _REOPENING_TABS:
+            for tab_id in self.results_nb.tabs():
+                if self.results_nb.tab(tab_id, "text") == tab:
+                    self.results_nb.select(tab_id)
+
+    def _watch_settings(self):
+        for var in self._setting_vars().values():
+            var.trace_add("write", lambda *_args: self._queue_save())
+        self.order_txt.bind("<KeyRelease>", lambda _e: self._queue_save(), add="+")
+        self.results_nb.bind("<<NotebookTabChanged>>", lambda _e: self._queue_save(), add="+")
+        self.winfo_toplevel().protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _queue_save(self):
+        if self._save_job is not None:
+            self.after_cancel(self._save_job)
+        self._save_job = self.after(_SAVE_DELAY_MS, self._save_settings)
+
+    def _save_settings(self):
+        if self._save_job is not None:
+            self.after_cancel(self._save_job)
+            self._save_job = None
+        saved = self._settings
+        for name, var in self._setting_vars().items():
+            try:
+                saved[name] = var.get()
+            except tk.TclError:
+                pass        # a half-typed number: keep the last good value
+        saved["order_text"] = self.order_txt.get("1.0", "end-1c")
+        saved["tab"] = self.results_nb.tab(self.results_nb.select(), "text")
+        top = self.winfo_toplevel()
+        saved["window_zoomed"] = top.state() == "zoomed"
+        if top.state() == "normal":
+            saved["window"] = f"{top.winfo_width()}x{top.winfo_height()}"
+        try:
+            save_json(self._settings_path, saved)
+        except OSError:
+            pass            # settings are a convenience, never worth interrupting for
+
+    def _on_close(self):
+        self._save_settings()
+        self.winfo_toplevel().destroy()
 
     def _build_dataline(self):
         bar = ttk.Frame(self)
@@ -554,6 +646,7 @@ class PlannerApp(ttk.Frame):
             self.data_status.config(text="SDE data loaded.")
             self._load_icons()
             self.find_btn.state(["!disabled"])
+            self.characters_tab.load_saved()
         else:
             self.data_status.config(
                 text=("No SDE data yet — click 'Download / Update SDE'. "
